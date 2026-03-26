@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多行庫 NFC 提款系統</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 React 與 ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- 引入 Babel 用來即時編譯 JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        /* 基礎動畫設定 */
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .animate-fade-in { animation: fadeIn 0.3s ease-in-out; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // --- 準備 Icon (替代 Lucide 圖標庫) ---
+        const Icon = ({ path, size = 24, className = "" }) => (
+            <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" dangerouslySetInnerHTML={{ __html: path }} />
+        );
+        const Icons = {
+            Nfc: '<path d="M6 8.32a7.43 7.43 0 0 1 0 7.36"/><path d="M9.46 6.21a11.76 11.76 0 0 1 0 11.58"/><path d="M12.91 4.1a15.91 15.91 0 0 1 .01 15.8"/><path d="M16.37 2a20.16 20.16 0 0 1 0 20"/>',
+            ShieldCheck: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
+            ChevronRight: '<path d="m9 18 6-6-6-6"/>',
+            XCircle: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
+            CheckCircle2: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+            Banknote: '<rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/>',
+            AlertCircle: '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>',
+            RefreshCcw: '<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21v-5h5"/>',
+            Building2: '<path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/>'
+        };
+
+        // --- 銀行清單設定 ---
+        const rawBanks = [
+            { id: 'CTBC', name: '中國信託', fullName: '中國信託銀行', enName: 'CTBC BANK', logo: '中', themeColor: '#10b981', lightColor: '#ecfdf5', rank: 1 },
+            { id: 'CATHAY', name: '國泰世華', fullName: '國泰世華銀行', enName: 'CATHAY UNITED BANK', logo: '泰', themeColor: '#16a34a', lightColor: '#f0fdf4', rank: 2 },
+            { id: 'TAISHIN', name: '台新銀行', fullName: '台新銀行', enName: 'Taishin Bank', logo: '新', themeColor: '#ef4444', lightColor: '#fef2f2', rank: 3 },
+            { id: 'ESUN', name: '玉山銀行', fullName: '玉山銀行', enName: 'E.SUN BANK', logo: '玉', themeColor: '#14b8a6', lightColor: '#f0fdfa', rank: 4 },
+            { id: 'KINGS', name: '京城銀行', fullName: '京城銀行', enName: "KING'S TOWN BANK", logo: '京', themeColor: '#b91c1c', lightColor: '#fef2f2', rank: null },
+            { id: 'POST', name: '中華郵政', fullName: '中華郵政 (郵局)', enName: 'CHUNGHWA POST', logo: '郵', themeColor: '#166534', lightColor: '#f0fdf4', rank: null, isPost: true }
+        ];
+
+        // 排序：有排名的銀行在前 -> 無排名的銀行在中間 -> 郵局永遠在最後
+        const BANKS = rawBanks.sort((a, b) => {
+            if (a.isPost) return 1;
+            if (b.isPost) return -1;
+            if (a.rank !== null && b.rank !== null) return a.rank - b.rank;
+            if (a.rank !== null) return -1;
+            if (b.rank !== null) return 1;
+            return 0;
+        });
+
+        function AtmInterface() {
+            const [step, setStep] = useState('BANK_SELECT');
+            const [selectedBank, setSelectedBank] = useState(null);
+            const [pin, setPin] = useState('');
+            const [amount, setAmount] = useState(0);
+            const [balance, setBalance] = useState(150000);
+            const [showReceipt, setShowReceipt] = useState(false);
+            const [errorMsg, setErrorMsg] = useState('');
+
+            const resetAtm = () => { setStep('IDLE'); setPin(''); setAmount(0); setShowReceipt(false); setErrorMsg(''); };
+            const switchBank = () => { setStep('BANK_SELECT'); setSelectedBank(null); setPin(''); setAmount(0); setShowReceipt(false); setErrorMsg(''); };
+            
+            const handlePinInput = (num) => { if (pin.length < 12) setPin(prev => prev + num); };
+            const handlePinConfirm = () => {
+                if (pin.length >= 4) { setStep('MENU'); } 
+                else { setErrorMsg('密碼長度過短，請重新輸入'); setTimeout(() => setErrorMsg(''), 3000); }
+            };
+
+            const handleAmountSelect = (selectedAmount) => {
+                if (selectedAmount > balance) {
+                    setErrorMsg('帳戶餘額不足，請重新選擇金額');
+                    setTimeout(() => setErrorMsg(''), 3000);
+                    return;
+                }
+                setAmount(selectedAmount);
+                setStep('PROCESSING');
+            };
+
+            useEffect(() => {
+                if (step === 'PROCESSING') {
+                    const timer = setTimeout(() => {
+                        setBalance(prev => prev - amount);
+                        setStep('RECEIPT_PROMPT');
+                    }, 2500);
+                    return () => clearTimeout(timer);
+                }
+            }, [step, amount]);
+
+            const getCurrentTime = () => {
+                const now = new Date();
+                return `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+            };
+
+            const renderBankSelection = () => (
+                <div className="flex flex-col items-center justify-center h-full p-8 animate-fade-in bg-gray-50 rounded-xl">
+                    <div className="mb-8 text-center">
+                        <h2 className="text-3xl font-bold text-gray-800 mb-2">請選擇要使用的 ATM 機台</h2>
+                        <p className="text-gray-500">系統將依照您選擇的銀行切換對應的操作介面</p>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 w-full max-w-4xl">
+                        {BANKS.map((bank) => (
+                        <button key={bank.id} onClick={() => { setSelectedBank(bank); setStep('IDLE'); }} className="relative bg-white p-6 rounded-2xl shadow-md border-2 border-transparent hover:-translate-y-1 hover:shadow-xl transition-all group flex flex-col items-center justify-center space-y-4" style={{ borderBottomColor: bank.themeColor, borderBottomWidth: '4px' }}>
+                            {bank.rank && <div className="absolute top-3 left-3 bg-yellow-400 text-yellow-900 text-xs font-bold px-2 py-1 rounded-full shadow-sm">市佔第 {bank.rank} 名</div>}
+                            <div className="w-16 h-16 rounded-full flex items-center justify-center text-white font-bold text-3xl shadow-md transition-transform group-hover:scale-110" style={{ backgroundColor: bank.themeColor }}>{bank.logo}</div>
+                            <div className="text-center">
+                                <div className="text-xl font-bold text-gray-800">{bank.name}</div>
+                                <div className="text-xs text-gray-400 mt-1">{bank.enName}</div>
+                            </div>
+                        </button>
+                        ))}
+                    </div>
+                </div>
+            );
+
+            const Header = () => {
+                if (!selectedBank) return null;
+                return (
+                    <div className="text-white p-4 flex justify-between items-center rounded-t-xl shadow-md z-10 transition-colors duration-500" style={{ backgroundColor: selectedBank.themeColor }}>
+                        <div className="flex items-center space-x-3">
+                            <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center font-bold text-xl" style={{ color: selectedBank.themeColor }}>{selectedBank.logo}</div>
+                            <h1 className="text-2xl font-bold tracking-widest">{selectedBank.fullName} {selectedBank.enName}</h1>
+                        </div>
+                        <div className="flex items-center space-x-4">
+                            <span className="text-sm font-medium opacity-90 hidden sm:inline">機台編號: 822-TN01</span>
+                            <button onClick={switchBank} className="flex items-center space-x-1 bg-black/20 hover:bg-black/40 px-3 py-1.5 rounded-lg text-sm transition-colors">
+                                <Icon path={Icons.Building2} size={16} /> <span>切換機台</span>
+                            </button>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderIdle = () => (
+                <div className="flex flex-col items-center justify-center h-full space-y-12 animate-fade-in relative">
+                    <h2 className="text-4xl font-bold text-gray-800 tracking-wider">歡迎使用{selectedBank.fullName} ATM</h2>
+                    <div onClick={() => setStep('PIN')} className="relative group cursor-pointer flex flex-col items-center justify-center p-12 bg-white rounded-3xl shadow-2xl border-4 transition-all duration-300 hover:shadow-lg" style={{ borderColor: selectedBank.lightColor }}>
+                        <div className="absolute inset-0 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300" style={{ backgroundColor: selectedBank.lightColor }}></div>
+                        <div className="relative z-10 flex flex-col items-center space-y-6">
+                            <div className="w-32 h-32 rounded-full flex items-center justify-center animate-pulse shadow-lg" style={{ backgroundColor: selectedBank.themeColor }}>
+                                <Icon path={Icons.Nfc} size={64} className="text-white" />
+                            </div>
+                            <p className="text-2xl font-bold" style={{ color: selectedBank.themeColor }}>請將具備 NFC 功能之金融卡或手機</p>
+                            <p className="text-xl text-gray-600">靠近此區域感應以開始交易</p>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderPinEntry = () => (
+                <div className="flex flex-col items-center justify-center h-full max-w-lg mx-auto w-full animate-fade-in">
+                    <div className="mb-8 text-center"><h2 className="text-3xl font-bold text-gray-800 mb-2">請輸入晶片密碼</h2><p className="text-gray-500">為保護您的安全，請防範他人窺視</p></div>
+                    {errorMsg && <div className="mb-4 text-red-600 bg-red-100 px-4 py-2 rounded-lg flex items-center"><Icon path={Icons.AlertCircle} size={20} className="mr-2" />{errorMsg}</div>}
+                    <div className="bg-white border-2 border-gray-300 h-16 w-full rounded-xl mb-8 flex items-center justify-center space-x-4 shadow-inner">
+                        {pin.length === 0 ? <span className="text-gray-400">請按下方數字鍵盤</span> : Array.from({ length: 12 }).map((_, i) => (
+                            <div key={i} className="w-4 h-4 rounded-full transition-colors" style={{ backgroundColor: i < pin.length ? selectedBank.themeColor : 'transparent' }}/>
+                        ))}
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 w-full">
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+                            <button key={num} onClick={() => handlePinInput(num.toString())} className="h-16 bg-white border border-gray-200 text-2xl font-semibold rounded-xl shadow-sm hover:bg-gray-50 active:bg-gray-200 transition">{num}</button>
+                        ))}
+                        <button onClick={() => setPin('')} className="h-16 font-bold text-xl rounded-xl shadow-sm transition" style={{ backgroundColor: selectedBank.lightColor, color: selectedBank.themeColor }}>清除</button>
+                        <button onClick={() => handlePinInput('0')} className="h-16 bg-white border border-gray-200 text-2xl font-semibold rounded-xl shadow-sm hover:bg-gray-50 active:bg-gray-200 transition">0</button>
+                        <button onClick={handlePinConfirm} className="h-16 bg-green-600 text-white font-bold text-xl rounded-xl shadow-sm hover:bg-green-700 active:bg-green-800 transition flex items-center justify-center">
+                            確認 <Icon path={Icons.ChevronRight} size={24} className="ml-1" />
+                        </button>
+                    </div>
+                    <button onClick={resetAtm} className="mt-10 px-6 py-3 bg-gray-200 text-gray-700 rounded-full font-bold hover:bg-gray-300 transition">取消交易</button>
+                </div>
+            );
+
+            const renderMenu = () => (
+                <div className="flex flex-col h-full animate-fade-in p-8">
+                    <h2 className="text-3xl font-bold text-gray-800 mb-8 border-l-8 pl-4" style={{ borderColor: selectedBank.themeColor }}>請選擇交易項目</h2>
+                    <div className="grid grid-cols-2 gap-8 flex-grow">
+                        <button onClick={() => setStep('AMOUNT')} className="bg-white rounded-2xl shadow-md border-2 border-transparent flex flex-col items-center justify-center space-y-4 hover:shadow-xl transition-all group" style={{ '--hover-border': selectedBank.themeColor }}>
+                            <div style={{ color: selectedBank.themeColor }} className="group-hover:scale-110 transition-transform"><Icon path={Icons.Banknote} size={64} /></div>
+                            <span className="text-3xl font-bold text-gray-800">自行提款</span>
+                        </button>
+                        <button className="bg-gray-100 rounded-2xl border-2 border-transparent flex flex-col items-center justify-center space-y-4 opacity-50 cursor-not-allowed">
+                            <Icon path={Icons.RefreshCcw} size={64} className="text-gray-400" />
+                            <span className="text-3xl font-bold text-gray-500">轉帳 (未開放)</span>
+                        </button>
+                        <button className="bg-gray-100 rounded-2xl border-2 border-transparent flex flex-col items-center justify-center space-y-4 opacity-50 cursor-not-allowed">
+                            <Icon path={Icons.ShieldCheck} size={64} className="text-gray-400" />
+                            <span className="text-3xl font-bold text-gray-500">餘額查詢 (未開放)</span>
+                        </button>
+                        <button className="bg-gray-100 rounded-2xl border-2 border-transparent flex flex-col items-center justify-center space-y-4 opacity-50 cursor-not-allowed">
+                            <Icon path={Icons.XCircle} size={64} className="text-gray-400" />
+                            <span className="text-3xl font-bold text-gray-500">密碼變更 (未開放)</span>
+                        </button>
+                    </div>
+                    <div className="mt-8 flex justify-end">
+                        <button onClick={resetAtm} className="px-8 py-4 bg-gray-800 text-white rounded-xl font-bold text-xl hover:bg-gray-900 transition shadow-lg">退卡 / 結束交易</button>
+                    </div>
+                </div>
+            );
+
+            const renderAmountSelection = () => {
+                const amounts = [1000, 2000, 3000, 5000, 10000, 20000, 30000];
+                return (
+                    <div className="flex flex-col h-full animate-fade-in p-8">
+                        <h2 className="text-3xl font-bold text-gray-800 mb-2 border-l-8 pl-4" style={{ borderColor: selectedBank.themeColor }}>請選擇提款金額</h2>
+                        <p className="text-gray-500 mb-8 pl-6">本機台僅提供千元鈔</p>
+                        {errorMsg && <div className="mb-6 text-red-600 bg-red-100 px-4 py-3 rounded-lg flex items-center text-lg font-bold"><Icon path={Icons.AlertCircle} size={24} className="mr-2" />{errorMsg}</div>}
+                        <div className="grid grid-cols-2 gap-6 flex-grow">
+                            {amounts.map((amt) => (
+                                <button key={amt} onClick={() => handleAmountSelect(amt)} className="bg-white rounded-xl shadow border-2 border-gray-100 text-3xl font-bold text-gray-800 hover:border-gray-300 transition-all flex items-center justify-between px-8"
+                                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = selectedBank.lightColor; e.currentTarget.style.borderColor = selectedBank.themeColor; e.currentTarget.style.color = selectedBank.themeColor; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#ffffff'; e.currentTarget.style.borderColor = '#f3f4f6'; e.currentTarget.style.color = '#1f2937'; }}
+                                >
+                                    <span>{amt.toLocaleString()}</span><span className="text-lg text-gray-400 font-normal">TWD</span>
+                                </button>
+                            ))}
+                            <button onClick={resetAtm} className="bg-gray-200 rounded-xl shadow border border-gray-300 text-2xl font-bold text-gray-700 hover:bg-gray-300 transition-all flex items-center justify-center">取消交易</button>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderProcessing = () => (
+                <div className="flex flex-col items-center justify-center h-full animate-fade-in">
+                    <div className="w-24 h-24 border-8 border-gray-200 rounded-full animate-spin mb-8" style={{ borderTopColor: selectedBank.themeColor }}></div>
+                    <h2 className="text-3xl font-bold text-gray-800 mb-4">交易處理中</h2>
+                    <p className="text-xl text-gray-500">請稍候，正在為您連線至系統...</p>
+                </div>
+            );
+
+            const renderReceiptPrompt = () => (
+                <div className="flex flex-col items-center justify-center h-full animate-fade-in p-8">
+                    <div className="bg-white p-12 rounded-3xl shadow-xl w-full max-w-2xl text-center border-t-8" style={{ borderTopColor: selectedBank.themeColor }}>
+                        <h2 className="text-4xl font-bold text-gray-800 mb-4">交易成功</h2><p className="text-2xl text-gray-600 mb-12">請問是否需要於螢幕上顯示交易明細？</p>
+                        <div className="flex justify-center space-x-8">
+                            <button onClick={() => { setShowReceipt(false); setStep('DISPENSE'); }} className="w-48 py-6 bg-gray-200 text-gray-800 text-2xl font-bold rounded-2xl hover:bg-gray-300 transition">不需要</button>
+                            <button onClick={() => { setShowReceipt(true); setStep('DISPENSE'); }} className="w-48 py-6 text-white text-2xl font-bold rounded-2xl shadow-lg transition hover:brightness-110" style={{ backgroundColor: selectedBank.themeColor }}>顯示明細</button>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderDispense = () => (
+                <div className="flex flex-col items-center justify-center h-full animate-fade-in p-8">
+                    <div className="animate-bounce mb-8"><Icon path={Icons.Banknote} size={128} className="text-green-600" /></div>
+                    <h2 className="text-4xl font-bold text-gray-800 mb-4 text-center">請取鈔</h2>
+                    <p className="text-2xl text-gray-600 mb-12 text-center">您的現金 TWD {amount.toLocaleString()} 已吐出，請清點</p>
+                    <button onClick={() => showReceipt ? setStep('RECEIPT') : setStep('DONE')} className="px-12 py-5 bg-green-600 text-white text-2xl font-bold rounded-full hover:bg-green-700 shadow-lg shadow-green-200 transition flex items-center">
+                        <Icon path={Icons.CheckCircle2} size={32} className="mr-3" />我已取鈔
+                    </button>
+                </div>
+            );
+
+            const renderReceipt = () => (
+                <div className="flex flex-col items-center justify-center h-full animate-fade-in p-6 py-10 overflow-y-auto">
+                    <div className="bg-yellow-50 w-full max-w-md p-8 rounded-sm border-2 border-dashed border-gray-300 shadow-md relative font-mono text-gray-800">
+                        <div className="text-center border-b-2 border-gray-800 pb-4 mb-4"><h3 className="text-2xl font-bold tracking-widest" style={{ color: selectedBank.themeColor }}>{selectedBank.fullName}</h3><p className="text-lg">客戶交易明細表</p></div>
+                        <div className="space-y-3 text-lg">
+                            <div className="flex justify-between"><span>日期時間:</span><span>{getCurrentTime()}</span></div>
+                            <div className="flex justify-between"><span>機台代號:</span><span>822-TN01</span></div>
+                            <div className="flex justify-between"><span>交易序號:</span><span>0852{Math.floor(Math.random() * 10000).toString().padStart(4, '0')}</span></div>
+                            <div className="flex justify-between"><span>交易帳號:</span><span>****-***-123456</span></div>
+                            <div className="flex justify-between"><span>交易類別:</span><span>自行提款</span></div>
+                            <div className="border-t border-dashed border-gray-400 my-2 pt-2"></div>
+                            <div className="flex justify-between font-bold text-xl" style={{ color: selectedBank.themeColor }}><span>提款金額:</span><span>- TWD {amount.toLocaleString()}</span></div>
+                            <div className="flex justify-between font-bold"><span>可用餘額:</span><span>TWD {balance.toLocaleString()}</span></div>
+                        </div>
+                        <div className="mt-8 text-center text-sm text-gray-500 border-t-2 border-gray-800 pt-4"><p>感謝您使用{selectedBank.name}服務</p></div>
+                    </div>
+                    <button onClick={() => setStep('DONE')} className="mt-8 px-10 py-4 bg-gray-800 text-white text-xl font-bold rounded-xl hover:bg-gray-900 transition shadow-lg">關閉明細並結束</button>
+                </div>
+            );
+
+            const renderDone = () => (
+                <div className="flex flex-col items-center justify-center h-full animate-fade-in p-8">
+                    <div className="mb-6"><Icon path={Icons.CheckCircle2} size={128} className="text-green-500" /></div>
+                    <h2 className="text-4xl font-bold text-gray-800 mb-4">交易完成</h2>
+                    <p className="text-2xl text-gray-600 mb-12">請妥善保管您的財物，歡迎再次使用</p>
+                    <button onClick={resetAtm} className="px-12 py-5 text-white text-2xl font-bold rounded-full shadow-lg transition hover:brightness-110" style={{ backgroundColor: selectedBank.themeColor }}>回首頁</button>
+                </div>
+            );
+
+            const renderCurrentStep = () => {
+                switch (step) {
+                    case 'BANK_SELECT': return renderBankSelection();
+                    case 'IDLE': return renderIdle();
+                    case 'PIN': return renderPinEntry();
+                    case 'MENU': return renderMenu();
+                    case 'AMOUNT': return renderAmountSelection();
+                    case 'PROCESSING': return renderProcessing();
+                    case 'RECEIPT_PROMPT': return renderReceiptPrompt();
+                    case 'DISPENSE': return renderDispense();
+                    case 'RECEIPT': return renderReceipt();
+                    case 'DONE': return renderDone();
+                    default: return renderBankSelection();
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-200 flex items-center justify-center p-4 sm:p-8 font-sans">
+                    <div className="w-full max-w-5xl bg-gray-800 rounded-3xl p-4 sm:p-8 shadow-2xl relative border-b-8 border-gray-900">
+                        <div className="absolute top-3 left-1/2 transform -translate-x-1/2 flex space-x-4">
+                            <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,1)]"></div>
+                            <div className="w-3 h-3 bg-gray-900 rounded-full border border-gray-600"></div>
+                        </div>
+                        <div className="w-full aspect-[4/3] sm:aspect-[16/10] bg-gray-100 rounded-xl overflow-hidden flex flex-col relative shadow-inner border-4 border-gray-700">
+                            <Header />
+                            <div className="flex-grow overflow-hidden relative">
+                                <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/10 to-transparent pointer-events-none z-50"></div>
+                                {renderCurrentStep()}
+                            </div>
+                        </div>
+                        <div className="mt-8 flex justify-center space-x-12 opacity-80">
+                            <div className="text-gray-400 text-center"><div className="w-32 h-2 bg-black rounded-full mb-2 mx-auto"></div><span className="text-sm font-bold tracking-widest">NFC SENSOR</span></div>
+                            <div className="text-gray-400 text-center"><div className="w-48 h-4 bg-black rounded-sm mb-2 mx-auto border-2 border-gray-700"></div><span className="text-sm font-bold tracking-widest">CASH DISPENSER</span></div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<AtmInterface />);
+    </script>
+</body>
+</html>
