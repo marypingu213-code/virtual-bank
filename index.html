@@ -74,6 +74,15 @@
             { code: 'CNY', symbol: '🇨🇳', name: '人民幣', rate: 4.48, amounts: [100, 500, 1000, 5000] } // 最低 100, 最高 5000
         ];
 
+        // --- 鈔票真實圖片 URL 設定 ---
+        const banknoteImages = {
+            'TWD': { front: 'https://upload.wikimedia.org/wikipedia/commons/6/6b/1000_New_Taiwan_Dollar_2004_front.jpg', back: 'https://upload.wikimedia.org/wikipedia/commons/1/14/1000_New_Taiwan_Dollar_2004_back.jpg' },
+            'USD': { front: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/Usdollar100front.jpg/800px-Usdollar100front.jpg', back: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/23/Usdollar100back.jpg/800px-Usdollar100back.jpg' },
+            'JPY': { front: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c7/Series_E_10000_Yen.jpg/800px-Series_E_10000_Yen.jpg', back: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/90/Series_E_10000_Yen_back.jpg/800px-Series_E_10000_Yen_back.jpg' },
+            'CNY': { front: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/100_yuan_banknote_2005_front.jpg/800px-100_yuan_banknote_2005_front.jpg', back: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/100_yuan_banknote_2005_back.jpg/800px-100_yuan_banknote_2005_back.jpg' },
+            'HKD': { front: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/1000_HKD_Bank_of_China_2018_front.jpg/800px-1000_HKD_Bank_of_China_2018_front.jpg', back: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c0/1000_HKD_Bank_of_China_2018_back.jpg/800px-1000_HKD_Bank_of_China_2018_back.jpg' }
+        };
+
         function AtmInterface() {
             const [step, setStep] = useState('BANK_SELECT');
             const [selectedBank, setSelectedBank] = useState(null);
@@ -87,14 +96,15 @@
             const [transactionType, setTransactionType] = useState('TWD_WITHDRAW');
             const [currencyInfo, setCurrencyInfo] = useState({ code: 'TWD', name: '新台幣', rate: 1, amounts: [] });
             const [twdDeduction, setTwdDeduction] = useState(0);
+            const [isFlipped, setIsFlipped] = useState(false); // 新增翻面狀態
 
             const resetAtm = () => { 
                 setStep('IDLE'); setPin(''); setAmount(0); setShowReceipt(false); setErrorMsg(''); 
-                setTransactionType('TWD_WITHDRAW'); setCurrencyInfo({ code: 'TWD', name: '新台幣', rate: 1, amounts: [] }); setTwdDeduction(0);
+                setTransactionType('TWD_WITHDRAW'); setCurrencyInfo({ code: 'TWD', name: '新台幣', rate: 1, amounts: [] }); setTwdDeduction(0); setIsFlipped(false);
             };
             const switchBank = () => { 
                 setStep('BANK_SELECT'); setSelectedBank(null); setPin(''); setAmount(0); setShowReceipt(false); setErrorMsg(''); 
-                setTransactionType('TWD_WITHDRAW'); setCurrencyInfo({ code: 'TWD', name: '新台幣', rate: 1, amounts: [] }); setTwdDeduction(0);
+                setTransactionType('TWD_WITHDRAW'); setCurrencyInfo({ code: 'TWD', name: '新台幣', rate: 1, amounts: [] }); setTwdDeduction(0); setIsFlipped(false);
             };
             
             const handlePinInput = (num) => { if (pin.length < 12) setPin(prev => prev + num); };
@@ -329,18 +339,47 @@
                 </div>
             );
 
-            const renderDispense = () => (
-                <div className="flex flex-col items-center justify-center h-full animate-fade-in p-6 sm:p-8">
-                    <div className="animate-bounce mb-6 sm:mb-8"><Icon path={Icons.Banknote} size={100} className="text-green-600 sm:w-[128px] sm:h-[128px]" /></div>
-                    <h2 className="text-3xl sm:text-4xl font-bold text-gray-800 mb-4 text-center">請取鈔</h2>
-                    <p className="text-xl sm:text-2xl text-gray-600 mb-8 sm:mb-12 text-center leading-relaxed">
-                        您的現金 <span className="font-bold text-2xl sm:text-3xl mx-2 block sm:inline mt-2 sm:mt-0" style={{ color: selectedBank.themeColor }}>{currencyInfo.code} {amount.toLocaleString()}</span> 已吐出，請清點
-                    </p>
-                    <button onClick={() => showReceipt ? setStep('RECEIPT') : setStep('DONE')} className="px-8 py-4 sm:px-12 sm:py-5 bg-green-600 text-white text-xl sm:text-2xl font-bold rounded-full hover:bg-green-700 shadow-lg shadow-green-200 transition flex items-center">
-                        <Icon path={Icons.CheckCircle2} size={28} className="mr-3" />我已取鈔
-                    </button>
-                </div>
-            );
+            const renderDispense = () => {
+                const currentCurrency = transactionType === 'FX_WITHDRAW' ? currencyInfo.code : 'TWD';
+                const images = banknoteImages[currentCurrency] || banknoteImages['TWD'];
+
+                return (
+                    <div className="flex flex-col items-center justify-center h-full animate-fade-in p-6 sm:p-8">
+                        {/* 3D 翻轉鈔票區塊 */}
+                        <div 
+                            className="relative cursor-pointer mb-4 sm:mb-6 hover:scale-105 transition-transform"
+                            onClick={() => setIsFlipped(!isFlipped)}
+                            style={{ width: '320px', height: '150px', perspective: '1000px' }}
+                            title="點擊鈔票翻面"
+                        >
+                            <div 
+                                className="w-full h-full absolute transition-transform duration-700 shadow-xl rounded-md"
+                                style={{ transformStyle: 'preserve-3d', transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}
+                            >
+                                {/* 正面 */}
+                                <div className="absolute w-full h-full bg-gray-200 border border-gray-300 rounded-md flex items-center justify-center overflow-hidden" style={{ backfaceVisibility: 'hidden' }}>
+                                    <img src={images.front} alt="Front" className="w-full h-full object-cover" onError={(e) => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
+                                    <div className="hidden absolute inset-0 flex items-center justify-center bg-green-100 text-green-800 font-bold text-2xl">{currencyInfo.name} 正面</div>
+                                </div>
+                                {/* 反面 */}
+                                <div className="absolute w-full h-full bg-gray-200 border border-gray-300 rounded-md flex items-center justify-center overflow-hidden" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+                                    <img src={images.back} alt="Back" className="w-full h-full object-cover" onError={(e) => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
+                                    <div className="hidden absolute inset-0 flex items-center justify-center bg-green-200 text-green-800 font-bold text-2xl">{currencyInfo.name} 反面</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <h2 className="text-3xl sm:text-4xl font-bold text-gray-800 mb-2 text-center">請取鈔</h2>
+                        <p className="text-sm text-gray-500 mb-4 animate-pulse">(點擊上方鈔票可翻面)</p>
+                        <p className="text-xl sm:text-2xl text-gray-600 mb-8 sm:mb-12 text-center leading-relaxed">
+                            您的現金 <span className="font-bold text-2xl sm:text-3xl mx-2 block sm:inline mt-2 sm:mt-0" style={{ color: selectedBank.themeColor }}>{currencyInfo.code} {amount.toLocaleString()}</span> 已吐出，請清點
+                        </p>
+                        <button onClick={() => { setIsFlipped(false); showReceipt ? setStep('RECEIPT') : setStep('DONE'); }} className="px-8 py-4 sm:px-12 sm:py-5 bg-green-600 text-white text-xl sm:text-2xl font-bold rounded-full hover:bg-green-700 shadow-lg shadow-green-200 transition flex items-center">
+                            <Icon path={Icons.CheckCircle2} size={28} className="mr-3" />我已取鈔
+                        </button>
+                    </div>
+                );
+            };
 
             const renderReceipt = () => (
                 <div className="flex flex-col items-center justify-center h-full animate-fade-in p-4 sm:p-6 py-6 sm:py-10 overflow-y-auto">
